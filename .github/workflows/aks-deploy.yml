@@ -1,11 +1,13 @@
 name: CI/CD to AKS
 
+# Trigger the workflow on push to main branch or manual dispatch
 on:
   push:
     branches:
       - main
   workflow_dispatch:
 
+# Environment variables used throughout the workflow
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ACR_NAME: acr77225
@@ -15,6 +17,7 @@ env:
   AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
   K8S_NAMESPACE: production
 
+# Permissions required for the workflow
 permissions:
   contents: read
   id-token: write
@@ -25,24 +28,48 @@ jobs:
     environment: production
 
     steps:
+      # Checkout the repository code
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Set up Docker Buildx for advanced Docker builds
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # Authenticate with Azure using service principal credentials
       - name: Login to Azure
         uses: azure/login@v3
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # Extract client ID and subscription ID from Azure credentials for role assignment
+      - name: Extract SPN details
+        run: |
+          CREDENTIALS='${{ secrets.AZURE_CREDENTIALS }}'
+          CLIENT_ID=$(echo "$CREDENTIALS" | jq -r '.clientId')
+          SUBSCRIPTION_ID=$(echo "$CREDENTIALS" | jq -r '.subscriptionId')
+          echo "CLIENT_ID=$CLIENT_ID" >> $GITHUB_ENV
+          echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID" >> $GITHUB_ENV
+
+      # Assign Contributor role to the service principal on the resource group
+      - name: Assign Contributor role to SPN on resource group
+        run: |
+          az role assignment create --assignee $CLIENT_ID --role Contributor --scope /subscriptions/$SUBSCRIPTION_ID/resourceGroups/${{ env.AKS_RESOURCE_GROUP }}
+
+      # Verify that Azure login was successful and show account details
       - name: Verify Azure login
         run: |
           az account show
           az account list --all --output table
 
+      # Enable admin access on Azure Container Registry for authentication
+      - name: Enable ACR admin access
+        run: |
+          az acr update -n ${{ env.ACR_NAME }} --admin-enabled true
+
+      # Get credentials for AKS cluster to allow kubectl commands
       - name: Get AKS credentials
         run: |
           az aks get-credentials \
@@ -56,10 +83,12 @@ jobs:
           kubectl cluster-info
           kubectl get nodes --no-headers
 
+      # Login to Azure Container Registry to push/pull images
       - name: Login to Azure Container Registry
         run: |
           az acr login --name ${{ env.ACR_NAME }}
 
+      # Build Docker image and push to ACR with multiple tags
       - name: Build and push Docker image to ACR
         uses: docker/build-push-action@v7
         with:
@@ -71,10 +100,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Create Kubernetes namespace if it doesn't exist
       - name: Create Kubernetes namespace if not exists
         run: |
           kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
+      # Create image pull secret and service account for ACR access in Kubernetes
       - name: Create ACR pull secret and service account
         run: |
           # Get ACR credentials using service principal
@@ -95,17 +126,20 @@ jobs:
             -n ${{ env.K8S_NAMESPACE }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      # Apply Kubernetes deployment and service manifests
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
 
+      # Update the deployment to use the newly built image
       - name: Update deployment with new image
         run: |
           kubectl set image deployment/webapp-deployment \
             webapp=${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             -n ${{ env.K8S_NAMESPACE }}
 
+      # Check the status of pods and deployment before rollout
       - name: Check pod status before rollout
         run: |
           echo "Checking pods in namespace ${{ env.K8S_NAMESPACE }}..."
@@ -114,12 +148,14 @@ jobs:
           echo "Deployment status:"
           kubectl get deployment webapp-deployment -n ${{ env.K8S_NAMESPACE }}
 
+      # Wait for the deployment rollout to complete successfully
       - name: Wait for rollout to complete
         run: |
           kubectl rollout status deployment/webapp-deployment \
             -n ${{ env.K8S_NAMESPACE }} \
             --timeout=10m
 
+      # Debug and show pod logs if the rollout fails
       - name: Debug pod logs if rollout fails
         if: failure()
         run: |
@@ -133,6 +169,7 @@ jobs:
             echo ""
           done
 
+      # Retrieve and display the external IP of the LoadBalancer service
       - name: Get service external IP
         run: |
           echo "Waiting for LoadBalancer public IP..."
@@ -152,6 +189,7 @@ jobs:
             echo "Check status with: kubectl get svc webapp-service -n ${{ env.K8S_NAMESPACE }}"
           fi
 
+      # Verify the final state of the deployment, pods, and service
       - name: Verify deployment
         run: |
           echo "Deployment Status:"
@@ -163,6 +201,7 @@ jobs:
           echo "Service Status:"
           kubectl get service webapp-service -n ${{ env.K8S_NAMESPACE }}
 
+      # Provide a summary of the completed CI/CD pipeline
       - name: Deployment Summary
         run: |
           echo "=== CI/CD Pipeline Completed Successfully ==="
