@@ -1,6 +1,8 @@
+# CI/CD Pipeline for Deploying Node.js Web App to Azure Kubernetes Service (AKS)
+# This workflow automates the build, containerization, and deployment process
 name: CI/CD to AKS
 
-# Trigger the workflow on push to main branch or manual dispatch
+# Triggers: Run on push to main branch or manual dispatch
 on:
   push:
     branches:
@@ -17,24 +19,25 @@ env:
   AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
   K8S_NAMESPACE: production
 
-# Permissions required for the workflow
+# Required permissions for the workflow
 permissions:
   contents: read
   id-token: write
 
 jobs:
+  # Main job for building and deploying the application
   build-and-deploy:
     runs-on: ubuntu-latest
     environment: production
 
     steps:
-      # Checkout the repository code
+      # Checkout the repository code to the runner
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Set up Docker Buildx for advanced Docker builds
+      # Set up Docker Buildx for advanced build features
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -44,7 +47,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Extract client ID and subscription ID from Azure credentials for role assignment
+      # Extract service principal client ID and subscription ID from credentials
       - name: Extract SPN details
         run: |
           CREDENTIALS='${{ secrets.AZURE_CREDENTIALS }}'
@@ -69,26 +72,20 @@ jobs:
         run: |
           az acr update -n ${{ env.ACR_NAME }} --admin-enabled true
 
-      # Get credentials for AKS cluster to allow kubectl commands
+      # Get credentials for the AKS cluster to allow kubectl commands
       - name: Get AKS credentials
-        run: |
-          az aks get-credentials \
-            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
-            --name ${{ env.AKS_CLUSTER_NAME }} \
-            --admin \
-            --overwrite-existing
-          echo "KUBECONFIG=$KUBECONFIG"
-          kubectl config current-context
-          kubectl config view --minify
-          kubectl cluster-info
-          kubectl get nodes --no-headers
+        uses: azure/aks-set-context@v5
+        with:
+          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+          admin: 'false'
 
-      # Login to Azure Container Registry to push/pull images
+      # Login to Azure Container Registry to push images
       - name: Login to Azure Container Registry
         run: |
           az acr login --name ${{ env.ACR_NAME }}
 
-      # Build Docker image and push to ACR with multiple tags
+      # Build Docker image and push to Azure Container Registry
       - name: Build and push Docker image to ACR
         uses: docker/build-push-action@v7
         with:
@@ -105,7 +102,7 @@ jobs:
         run: |
           kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      # Create image pull secret and service account for ACR access in Kubernetes
+      # Create image pull secret and service account for ACR access
       - name: Create ACR pull secret and service account
         run: |
           # Get ACR credentials using service principal
@@ -148,14 +145,14 @@ jobs:
           echo "Deployment status:"
           kubectl get deployment webapp-deployment -n ${{ env.K8S_NAMESPACE }}
 
-      # Wait for the deployment rollout to complete successfully
+      # Wait for the deployment rollout to complete
       - name: Wait for rollout to complete
         run: |
           kubectl rollout status deployment/webapp-deployment \
             -n ${{ env.K8S_NAMESPACE }} \
             --timeout=10m
 
-      # Debug and show pod logs if the rollout fails
+      # Debug pod logs if the rollout fails
       - name: Debug pod logs if rollout fails
         if: failure()
         run: |
@@ -169,7 +166,7 @@ jobs:
             echo ""
           done
 
-      # Retrieve and display the external IP of the LoadBalancer service
+      # Get the external IP of the LoadBalancer service
       - name: Get service external IP
         run: |
           echo "Waiting for LoadBalancer public IP..."
@@ -189,7 +186,7 @@ jobs:
             echo "Check status with: kubectl get svc webapp-service -n ${{ env.K8S_NAMESPACE }}"
           fi
 
-      # Verify the final state of the deployment, pods, and service
+      # Verify the deployment by checking application health
       - name: Verify deployment
         run: |
           echo "Deployment Status:"
@@ -200,8 +197,15 @@ jobs:
           echo ""
           echo "Service Status:"
           kubectl get service webapp-service -n ${{ env.K8S_NAMESPACE }}
+          echo "Deployment Status:"
+          kubectl get deployment webapp-deployment -n ${{ env.K8S_NAMESPACE }}
+          echo ""
+          echo "Pods Status:"
+          kubectl get pods -n ${{ env.K8S_NAMESPACE }}
+          echo ""
+          echo "Service Status:"
+          kubectl get service webapp-service -n ${{ env.K8S_NAMESPACE }}
 
-      # Provide a summary of the completed CI/CD pipeline
       - name: Deployment Summary
         run: |
           echo "=== CI/CD Pipeline Completed Successfully ==="
