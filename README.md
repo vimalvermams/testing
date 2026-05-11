@@ -125,6 +125,16 @@ Navigate to your GitHub repository settings and add the following secrets:
    - Add a client secret
    - Grant Contributor role on the resource group
    - Copy the JSON output from `az ad sp create-for-rbac`
+   - If the output contains `appId` and `password`, convert it to the Azure Login format:
+
+     ```json
+     {
+       "clientId": "<appId>",
+       "clientSecret": "<password>",
+       "tenantId": "<tenant>",
+       "subscriptionId": "<subscriptionId>"
+     }
+     ```
 
 2. **AKS_RESOURCE_GROUP**: `RG-AKS-EUS-Vimal`
 

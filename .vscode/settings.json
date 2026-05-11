@@ -5,6 +5,14 @@
         "git rm": true,
         "true": true,
         "git checkout": true,
-        "git rebase": true
+        "git rebase": true,
+        "/^az aks list --query '\\[\\]\\.\\{name:name,resourceGroup:resourceGroup,fqdn:fqdn\\}' -o json \\| python3 -c 'import sys, json; data=json\\.load\\(sys\\.stdin\\); print\\(data\\)'$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python3 - <<'PY'\nimport socket\nfor host in \\['aks-cluste-rg-aks-eus-vimal-bfcf49-qg3jvvby\\.hcp\\.eastus\\.azmk8s\\.io','aks-cluster\\.aks-rg\\.eastus\\.azmk8s\\.io'\\]:\n    try:\n        print\\(host, socket\\.gethostbyname\\(host\\)\\)\n    except Exception as e:\n        print\\(host, 'ERROR', e\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }

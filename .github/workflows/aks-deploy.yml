@@ -44,11 +44,17 @@ jobs:
           az account list --all --output table
 
       - name: Get AKS credentials
-        uses: azure/aks-set-context@v5
-        with:
-          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
-          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
-          admin: 'false'
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --admin \
+            --overwrite-existing
+          echo "KUBECONFIG=$KUBECONFIG"
+          kubectl config current-context
+          kubectl config view --minify
+          kubectl cluster-info
+          kubectl get nodes --no-headers
 
       - name: Login to Azure Container Registry
         run: |
